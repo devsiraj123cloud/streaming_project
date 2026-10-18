@@ -95,3 +95,12 @@ def test_dashboard_html():
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert "IOE413" in res.text or "Digital Twin" in res.text
+
+def test_api_kafka_status():
+    res = client.get("/api/kafka/status")
+    assert res.status_code == 200
+    data = res.json()
+    assert "active" in data
+    assert "topic" in data
+    assert "bootstrap_servers" in data
+

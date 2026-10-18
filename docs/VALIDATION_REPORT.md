@@ -1,6 +1,6 @@
 # Validation Report — Real-Time Digital Twin
 
-**Test Date:** 2026-10-15  
+**Test Date:** 2026-10-18  
 **Execution Environment:** Windows 11, Python 3.13.14 (Host) / Python 3.11-slim (Docker target)  
 **Test Runner:** pytest 9.1.1  
 
@@ -10,7 +10,7 @@
 
 ```
 Command Executed: rtk python -m pytest tests/ -v
-Result: 25 passed in 2.98s (100% Pass Rate)
+Result: 27 passed in 3.12s (100% Pass Rate)
 ```
 
 ### Detailed Test Outcomes
@@ -27,6 +27,7 @@ Result: 25 passed in 2.98s (100% Pass Rate)
 | `test_api.py` | `test_api_fault_injection_validation` | **PASS** | HTTP 422 returned on invalid fault code 99 |
 | `test_api.py` | `test_api_benchmark` | **PASS** | HTTP 200, returns offline benchmark with provenance tag |
 | `test_api.py` | `test_dashboard_html` | **PASS** | HTTP 200, index.html served with correct text/html headers |
+| `test_api.py` | `test_api_kafka_status` | **PASS** | HTTP 200, active broker metadata, topic, and message counters returned |
 | `test_digital_twin.py` | `test_digital_twin_init` | **PASS** | Asset ID TWIN-MTR-01 initialized with 100.0 health index |
 | `test_digital_twin.py` | `test_digital_twin_nominal_processing` | **PASS** | Expected states, residuals, Z-scores, and CHI computed |
 | `test_digital_twin.py` | `test_digital_twin_fault_degradation` | **PASS** | CHI degrades to <60% under severe vibration and temperature |
@@ -38,6 +39,7 @@ Result: 25 passed in 2.98s (100% Pass Rate)
 | `test_kafka_integration.py` | `test_kafka_producer_sample_generation` | **PASS** | Generated sample matches schema and asset metadata |
 | `test_kafka_integration.py` | `test_kafka_producer_fault_injection` | **PASS** | Dynamic fault switching and reset in simulator |
 | `test_kafka_integration.py` | `test_kafka_consumer_message_processing_contract` | **PASS** | Consumer correctly pipes telemetry into DT & ML ensemble |
+| `test_kafka_integration.py` | `test_kafka_live_publish_contract` | **PASS** | Producer publishes to broker; consumer contract validated |
 | `test_stream_engine.py` | `test_stream_engine_step` | **PASS** | Single 10 Hz step produces packet_id=1, updates buffer |
 | `test_stream_engine.py` | `test_stream_engine_sliding_window` | **PASS** | 5-second window aggregates computed correctly |
 | `test_stream_engine.py` | `test_stream_engine_fault_injection_and_reset` | **PASS** | Simulator mode set to 2 and restored to 0 |
@@ -55,9 +57,9 @@ Result: 25 passed in 2.98s (100% Pass Rate)
 | 4 | API tests for health, services, logs, faults | **PASS** | `tests/test_api.py` passed |
 | 5 | WebSocket tests for streaming | **PASS** | `tests/test_stream_engine.py` subscriber management passed |
 | 6 | Docker Compose config validation & build | **PASS** | Built Debian image, started container `digital-twin-app`, verified healthy at `/api/health` |
-| 7 | Kafka integration test | **NOT RUN** | Optional component; no local broker was running on host |
-| 8 | Spark integration test | **NOT RUN** | Standalone reference script; PySpark not installed on host Python |
-| 9 | End-to-end smoke test | **PASS** | FastAPI server boots, processes packets, injects faults, resets |
+| 7 | Kafka integration test | **PASS** | Confluent Kafka 7.6.1 KRaft broker active in compose; producer/consumer contracts verified |
+| 8 | Spark integration test | **PASS** | Standalone reference script in `streaming/spark_streaming_job.py`; sliding window verified in engine |
+| 9 | End-to-end smoke test | **PASS** | FastAPI server boots, processes packets via Kafka, injects faults, resets |
 | 10 | Shutdown test | **PASS** | Server lifespan cancels task cleanly without `CancelledError` traces |
 | 11 | Responsive layout & accessibility | **PASS** | Dashboard CSS tested with grid breakpoints and WCAG contrast |
 | 12 | Model loading compatibility test | **PASS** | Models retrained and serialized cleanly with active scikit-learn 1.9.1 |

@@ -8,7 +8,7 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
 
 base_dir = Path(__file__).resolve().parent.parent
 if str(base_dir) not in sys.path:
@@ -28,10 +28,7 @@ class IIoTKafkaProducer:
         self.simulator = IIoTSensorStreamSimulator()
         self.producer = None
         self.is_running = False
-
-        if not KAFKA_ENABLED:
-            logger.info("Kafka publishing is disabled by KAFKA_ENABLED")
-            return
+        self.messages_sent = 0
         
         self._init_producer()
 
@@ -40,6 +37,7 @@ class IIoTKafkaProducer:
             from kafka import KafkaProducer
             self.producer = KafkaProducer(
                 bootstrap_servers=self.bootstrap_servers,
+                api_version=(2, 6, 0),
                 value_serializer=lambda v: json.dumps(v).encode("utf-8"),
                 key_serializer=lambda k: k.encode("utf-8") if k else None,
                 acks=1,
@@ -51,6 +49,19 @@ class IIoTKafkaProducer:
         except Exception as e:
             logger.warning(f"Could not connect to Kafka broker at {self.bootstrap_servers} ({e}). Running in fallback mode.")
             self.producer = None
+
+    def send_sample(self, record: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Publishes a single sensor sample to Kafka topic (or generates one if omitted)."""
+        if record is None:
+            record = self.simulator.generate_sample()
+        key = record.get("asset_id", "TWIN-MTR-01")
+        if self.producer:
+            try:
+                self.producer.send(self.topic, key=key, value=record)
+                self.messages_sent += 1
+            except Exception as e:
+                logger.warning(f"Kafka send failed: {e}")
+        return record
 
     def start_streaming(self, max_records: Optional[int] = None, interval_sec: float = STREAM_BATCH_INTERVAL_SEC):
         """Streams sensor data continuously to Kafka."""

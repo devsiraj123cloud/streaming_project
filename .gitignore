@@ -118,7 +118,7 @@ temp/
 # ==============================
 # Generated Experiment Outputs
 # ==============================
-#/runs/
+/runs/
 
 # ==============================
 # Generated Dataset Directories

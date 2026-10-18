@@ -28,8 +28,8 @@ if %errorlevel% neq 0 (
 
 echo  [OK] Docker is running.
 
-REM -- Build and start the full Kafka + Spark + app stack --
-echo  [INFO] Building and starting the application...
+REM -- Build and start the application and Kafka broker stack --
+echo  [INFO] Building and starting the application with Kafka...
 docker compose up --build -d
 
 if %errorlevel% neq 0 (

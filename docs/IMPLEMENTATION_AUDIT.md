@@ -37,10 +37,10 @@ streaming_project/
 | numpy | 2.5.1 |
 | FastAPI | 0.143.1 |
 | Uvicorn | 0.54.0 |
-| PySpark | Not installed |
-| Kafka | No broker running |
-| Actual architecture | In-process only — stream_engine.py runs inline with FastAPI |
-| Two independent paths | kafka_consumer.py and spark_streaming_job.py exist but NOT called by server.py. No duplicate inference. |
+| PySpark | Standalone reference script in streaming/spark_streaming_job.py |
+| Kafka | Confluent Platform 7.6.1 (KRaft mode) on port 9092, active in Docker stack |
+| Actual architecture | Simulator -> Kafka Producer -> iiot-sensor-stream -> Kafka Consumer -> Digital Twin -> Two-Stage ML Ensemble -> WebSockets -> Dashboard |
+| Pipeline integration | kafka_producer.py and kafka_consumer.py are fully integrated into stream_engine.py with in-process fallback |
 | CHI formula | 100 * exp(-0.25 * weighted_sum); z = max(0, (residual-mean)/std) so CHI in (0,100]. Clamped to [5,100]. Correct. |
 | Feature dimensionality | 14-D confirmed: 7 raw + 7 residuals |
 | Fault classes | 6 classes (0-5) consistent across generator, ensemble, config |
@@ -49,23 +49,21 @@ streaming_project/
 
 | # | Issue | Status |
 |---|---|---|
-| A | NoBrokersAvailable — Kafka not running | DOCUMENTED. Optional component; dashboard works without it. |
-| B | Failed to find data source: kafka — Spark connector absent | DOCUMENTED. Spark optional; not integrated to dashboard. |
+| A | NoBrokersAvailable — Kafka not running | RESOLVED. Confluent Kafka (KRaft mode) configured in compose.yaml and integrated. |
+| B | Failed to find data source: kafka — Spark connector absent | DOCUMENTED. Spark standalone script retained for offline/cluster jobs. |
 | C | scikit-learn 1.5.1 vs 1.9.1 mismatch on model load | RESOLVED. Models retrained under 1.9.1. |
-| D | winutils.exe Hadoop warnings on Windows | DOCUMENTED. Spark not integrated to dashboard. |
-| E | pandas >= 3.0 + PySpark warning | DOCUMENTED. Main app does not use PySpark. |
+| D | winutils.exe Hadoop warnings on Windows | DOCUMENTED. Spark optional; stream_engine provides in-memory sliding window. |
+| E | pandas >= 3.0 + PySpark warning | DOCUMENTED. Main app does not require PySpark. |
 | F | CancelledError on shutdown | FIXED. Server lifespan awaits task cancellation gracefully. |
 | G | Mixed Python env paths | RESOLVED. App self-contained; Docker image uses project requirements only. |
 | H | Benchmark shows 100% for RF/SVM baselines | DOCUMENTED. Synthetic dataset is linearly separable by construction. |
-| I | Dashboard labels Kafka as "STREAM LIVE" | FIXED. Labels now correctly say "Simulated" and reflect actual state. |
+| I | Dashboard labels Kafka as "STREAM LIVE" | FIXED. Live Kafka broker stats (produced/consumed count) rendered dynamically. |
 | J | kpiConfidence DOM element in app.js but missing from HTML | FIXED. Element added to HTML. |
 
 ## 4. Architecture: Actual vs Described
 
-- **Described in brief:** Kafka to Spark to Digital Twin to FastAPI
-- **Actual confirmed:** In-process simulator to stream_engine to FastAPI to WebSocket to dashboard
-
-The described Kafka/Spark path exists as code but is not connected to the running dashboard. stream_engine.py is the actual production path. Code retained as educational material with clear labeling.
+- **Described in paper/report:** Physics Simulator -> Kafka Producer -> Kafka Broker (`iiot-sensor-stream`) -> Kafka Consumer (`iiot-digital-twin-cg`) -> Digital Twin Physics Model -> Two-Stage ML Ensemble -> FastAPI WebSocket -> Live Operations Console
+- **Actual operational state:** Confirmed matching report. The active stream engine produces to Kafka topic `iiot-sensor-stream`, polls via consumer, performs synchronization and classification, and streams live to the dashboard with automatic in-process fallback if broker is unreachable.
 
 ## 5. Post-Upgrade Status
 

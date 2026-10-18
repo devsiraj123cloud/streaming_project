@@ -45,9 +45,9 @@
           <span class="status-dot" id="engineDot"></span>
           <span id="engineLabel">Initialising</span>
         </div>
-        <div class="status-item text-dim" title="Kafka broker (optional)">
-          <span class="status-dot dot-offline"></span>
-          <span>Kafka (optional)</span>
+        <div class="status-item" id="kafkaStatusBadge" title="Apache Kafka KRaft Message Broker">
+          <span class="status-dot dot-offline" id="kafkaDot"></span>
+          <span id="kafkaLabel">Kafka: Offline</span>
         </div>
       </div>
       <div class="packet-counter" aria-label="Packets processed">
@@ -367,7 +367,7 @@
           <div class="pipe-arrow pipe-arrow-dim"></div>
           <div class="pipe-node pipe-offline" id="pipeKafka">
             <div class="pipe-name">Kafka</div>
-            <div class="pipe-sub">Optional</div>
+            <div class="pipe-sub" id="pipeKafkaSub">127.0.0.1:9092</div>
           </div>
           <div class="pipe-arrow pipe-arrow-dim"></div>
           <div class="pipe-node pipe-offline" id="pipeSpark">

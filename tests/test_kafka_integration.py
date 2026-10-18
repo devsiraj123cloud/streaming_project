@@ -7,10 +7,10 @@ import pytest
 import time
 from streaming.kafka_producer import IIoTKafkaProducer
 from streaming.kafka_consumer import IIoTKafkaConsumer
-from config.settings import KAFKA_TOPIC_TELEMETRY
+from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_TELEMETRY
 
 def test_kafka_producer_sample_generation():
-    producer = IIoTKafkaProducer(bootstrap_servers="localhost:9092")
+    producer = IIoTKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     sample = producer.simulator.generate_sample()
     
     assert "asset_id" in sample
@@ -22,7 +22,7 @@ def test_kafka_producer_sample_generation():
     assert "fault_name" in sample
 
 def test_kafka_producer_fault_injection():
-    producer = IIoTKafkaProducer(bootstrap_servers="localhost:9092")
+    producer = IIoTKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     producer.inject_fault(1, 0.9)
     assert producer.simulator.current_mode == 1
     assert producer.simulator.mode_intensity == 0.9
@@ -32,7 +32,7 @@ def test_kafka_producer_fault_injection():
     assert producer.simulator.mode_intensity == 0.0
 
 def test_kafka_consumer_message_processing_contract():
-    consumer = IIoTKafkaConsumer(bootstrap_servers="localhost:9092")
+    consumer = IIoTKafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
     test_telemetry = {
         "timestamp": time.time(),
         "asset_id": "TWIN-MTR-01",
@@ -56,3 +56,13 @@ def test_kafka_consumer_message_processing_contract():
     assert "fault_code" in prediction
     assert prediction["is_anomaly"] is False
     assert prediction["fault_code"] == 0
+
+def test_kafka_live_publish_contract():
+    producer = IIoTKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+    sample = producer.send_sample()
+    assert sample is not None
+    assert "asset_id" in sample
+    consumer = IIoTKafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS)
+    assert consumer.digital_twin is not None
+    assert consumer.ensemble is not None
+

@@ -18,8 +18,9 @@ from typing import Dict, Any, List, Set
 from data.generator import IIoTSensorStreamSimulator
 from models.digital_twin import IndustrialDigitalTwin
 from models.two_stage_ensemble import TwoStageFaultDetectionEnsemble
-from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_ENABLED, KAFKA_TOPIC_TELEMETRY
+from streaming.kafka_producer import IIoTKafkaProducer
 from streaming.kafka_consumer import IIoTKafkaConsumer
+from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_TELEMETRY
 
 logger = logging.getLogger("StreamEngine")
 _kafka_queue = None
@@ -89,19 +90,47 @@ class RealTimeStreamingEngine:
         self._kafka_error = None
         self._event_loop = None
 
+        # Kafka Streaming Integration (Ranpariya & Sharma 2025 Architecture)
+        self.kafka_bootstrap_servers = KAFKA_BOOTSTRAP_SERVERS
+        self.kafka_topic = KAFKA_TOPIC_TELEMETRY
+        try:
+            self.kafka_producer = IIoTKafkaProducer(bootstrap_servers=self.kafka_bootstrap_servers, topic=self.kafka_topic)
+            self.kafka_consumer = IIoTKafkaConsumer(bootstrap_servers=self.kafka_bootstrap_servers, topic=self.kafka_topic)
+            self.kafka_active = bool(self.kafka_producer.producer is not None)
+            if self.kafka_active:
+                logger.info(f"[Engine] Kafka streaming active on topic '{self.kafka_topic}' ({self.kafka_bootstrap_servers})")
+        except Exception as exc:
+            logger.warning(f"[Engine] Kafka broker unavailable ({exc}); defaulting to in-process pipeline.")
+            self.kafka_producer = None
+            self.kafka_consumer = None
+            self.kafka_active = False
+
     def inject_fault(self, fault_code: int, intensity: float = 1.0):
         """Dynamic fault injection triggered from dashboard controls."""
         self.simulator.set_fault_mode(fault_code, intensity)
-        if self.kafka_consumer:
-            self.kafka_consumer.simulator.set_fault_mode(fault_code, intensity)
+        if self.kafka_producer:
+            self.kafka_producer.inject_fault(fault_code, intensity)
         logger.info(f"[Engine] Fault state set to {fault_code} (intensity: {intensity})")
 
     def reset_fault(self):
         """Restore pristine normal operating conditions."""
         self.simulator.reset_to_normal()
-        if self.kafka_consumer:
-            self.kafka_consumer.simulator.reset_to_normal()
+        if self.kafka_producer:
+            self.kafka_producer.reset_fault()
         logger.info("[Engine] Restored to normal operation.")
+
+    def get_kafka_info(self) -> Dict[str, Any]:
+        """Returns live Kafka broker and telemetry metrics."""
+        connected = bool(self.kafka_producer and self.kafka_producer.producer is not None)
+        return {
+            "active": connected,
+            "bootstrap_servers": self.kafka_bootstrap_servers,
+            "topic": self.kafka_topic,
+            "group_id": "iiot-digital-twin-cg",
+            "messages_produced": getattr(self.kafka_producer, "messages_sent", 0) if self.kafka_producer else 0,
+            "messages_consumed": getattr(self.kafka_consumer, "messages_received", 0) if self.kafka_consumer else 0,
+            "mode": "Active Kafka KRaft Broker Stream" if connected else "In-Process Simulation Fallback"
+        }
 
     def register_client(self, ws):
         """Add active WebSocket connection."""
@@ -137,8 +166,8 @@ class RealTimeStreamingEngine:
     async def step(self) -> Dict[str, Any]:
         """
         Executes a single streaming cycle:
-        1. Sensor sample generation
-        2. Digital Twin synchronization
+        1. Sensor sample generation & Kafka publishing
+        2. Kafka message polling & Digital Twin synchronization
         3. Two-Stage Ensemble inference
         4. Alert logging
         """
@@ -159,11 +188,25 @@ class RealTimeStreamingEngine:
                 logger.error("Kafka publish queue is full; telemetry sample was not published")
                 raise RuntimeError("Kafka telemetry queue is full") from exc
         
-        # 2. Digital Twin mathematical synchronization & residuals
-        twin_state = self.digital_twin.process_telemetry(raw_telemetry)
-        
-        # 3. Two-Stage ML Ensemble prediction (Ranpariya & Sharma 2025)
-        prediction = self.ensemble.predict_stream_packet(raw_telemetry, twin_state["residuals"])
+        # 2. Ingest through Kafka if active
+        kafka_meta = None
+        if self.kafka_active and self.kafka_producer and self.kafka_producer.producer:
+            try:
+                self.kafka_producer.send_sample(raw_telemetry)
+                if self.kafka_consumer:
+                    consumed = self.kafka_consumer.poll_packet(timeout_ms=10)
+                    if consumed:
+                        raw_telemetry = consumed["raw_telemetry"]
+                        twin_state = consumed["digital_twin"]
+                        prediction = consumed["prediction"]
+                        kafka_meta = consumed.get("kafka_metadata")
+            except Exception as e:
+                logger.warning(f"[Engine] Kafka step error: {e}")
+
+        # In-process Digital Twin mathematical synchronization & residuals if not consumed from Kafka
+        if kafka_meta is None:
+            twin_state = self.digital_twin.process_telemetry(raw_telemetry)
+            prediction = self.ensemble.predict_stream_packet(raw_telemetry, twin_state["residuals"])
         
         # 4. Construct unified telemetry payload
         packet = {
@@ -172,7 +215,9 @@ class RealTimeStreamingEngine:
             "raw_telemetry": raw_telemetry,
             "digital_twin": twin_state,
             "prediction": prediction,
-            "window_aggregates": self.compute_sliding_window_metrics()
+            "window_aggregates": self.compute_sliding_window_metrics(),
+            "kafka_enabled": self.kafka_active,
+            "kafka_metadata": kafka_meta
         }
         
         self.recent_buffer.append(packet)
@@ -292,6 +337,7 @@ class RealTimeStreamingEngine:
 
     def stop(self):
         self.is_running = False
+        if self.kafka_producer:
+            self.kafka_producer.stop()
         if self.kafka_consumer:
             self.kafka_consumer.stop()
-        self._event_loop = None

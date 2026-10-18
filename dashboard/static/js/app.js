@@ -37,6 +37,10 @@
     wsLabel:        $('wsLabel'),
     engineDot:      $('engineDot'),
     engineLabel:    $('engineLabel'),
+    kafkaDot:       $('kafkaDot'),
+    kafkaLabel:     $('kafkaLabel'),
+    pipeKafka:      $('pipeKafka'),
+    pipeKafkaSub:   $('pipeKafkaSub'),
     packetCount:    $('packetCount'),
     reconnectBanner:$('reconnectBanner'),
     reconnectMsg:   $('reconnectMsg'),
@@ -417,6 +421,19 @@
       `;
       dom.serviceList.appendChild(row);
     });
+
+    const kafkaSvc = services.find(s => s.id === 'kafka-broker');
+    if (kafkaSvc && kafkaSvc.state === 'healthy') {
+      if (dom.kafkaDot) setClass(dom.kafkaDot, 'status-dot dot-healthy');
+      if (dom.kafkaLabel) setText(dom.kafkaLabel, `Kafka: Active (9092)`);
+      if (dom.pipeKafka) setClass(dom.pipeKafka, 'pipe-node pipe-active');
+      if (dom.pipeKafkaSub) setText(dom.pipeKafkaSub, `${kafkaSvc.messages_produced || 0} msgs`);
+    } else {
+      if (dom.kafkaDot) setClass(dom.kafkaDot, 'status-dot dot-offline');
+      if (dom.kafkaLabel) setText(dom.kafkaLabel, 'Kafka: Offline');
+      if (dom.pipeKafka) setClass(dom.pipeKafka, 'pipe-node pipe-offline');
+      if (dom.pipeKafkaSub) setText(dom.pipeKafkaSub, 'Fallback');
+    }
   }
 
   function stateToClass(state) {

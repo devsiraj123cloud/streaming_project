@@ -2,6 +2,15 @@
 
 This document details the architectural topology, dataflow, network bindings, and component boundaries of the IOE413 Real-Time Digital Twin Streaming Project.
 
+**Academic Team:** Team 12  
+- **Mohammed Sirajudheen** (2023BCS0132) — Lead System Architecture  
+- **Rohit Pratap Singh** (2023BCS0138) — Streaming Engine & Kafka Ingestion  
+- **Amit Kumar** (2023BCS0210) — Digital Twin Physics Model & Residuals  
+- **Kartik P** (2023BCD0051) — ML Ensemble & Benchmarks  
+
+**Baseline Research Paper:**  
+A. Ranpariya and S. Sharma, *"A digital twin solution for fault detection in time-critical IIoT applications,"* *Journal of Simulation*, vol. 19, no. 4, pp. 441–454, 2025. [DOI: 10.1080/17477778.2025.2453725](https://doi.org/10.1080/17477778.2025.2453725)
+
 ---
 
 ## 1. System Architecture Diagram
@@ -9,13 +18,23 @@ This document details the architectural topology, dataflow, network bindings, an
 ```mermaid
 flowchart TD
     subgraph EdgeSimulation ["Edge Simulation Layer"]
-        SIM["IIoTSensorStreamSimulator\n(10 Hz / 100 ms Interval)\n6 Fault Modes"]
-        FI["Fault Injection Controller\n(REST /api/fault/inject)"]
+        SIM["IIoTSensorStreamSimulator\n(10 Hz / 100 ms Interval)\n6 Fault Modes (0-5)"]
+        FI["Fault Injection Controller\n(REST POST /api/fault/inject)"]
         FI -->|Set Mode / Intensity| SIM
     end
 
-    subgraph CoreEngine ["In-Process RealTimeStreamingEngine"]
-        SIM -->|Raw Telemetry 7-D| STEP["Engine Step Loop"]
+    subgraph KafkaIngestion ["Apache Kafka Event Broker (KRaft Mode)"]
+        PROD["IIoTKafkaProducer\n(JSON Serializer, Key: asset_id)"]
+        TOPIC["Kafka Topic: iiot-sensor-stream\n(Partition 0, Strict FIFO Ordering)"]
+        CONS["IIoTKafkaConsumer\n(Group: iiot-digital-twin-cg)"]
+        
+        SIM -->|Raw Telemetry 7-D| PROD
+        PROD -->|Publish 10 Hz| TOPIC
+        TOPIC -->|Poll Records| CONS
+    end
+
+    subgraph CoreEngine ["Stream Engine & Analytics Core"]
+        CONS -->|Ingested Telemetry| STEP["Engine Step Loop (with local fallback)"]
         
         subgraph DigitalTwin ["Digital Twin Physics Model"]
             DT["IndustrialDigitalTwin (TWIN-MTR-01)\nVirtual Physics Calculations\nResiduals: R(t) = |X_actual - X_exp|\nComposite Health Index (CHI)"]
@@ -25,12 +44,12 @@ flowchart TD
         DT -->|7-D Residuals + CHI| STEP
         
         subgraph MLEnsemble ["Two-Stage Machine Learning Ensemble"]
-            S1["Stage 1: SGD Fast Binary Filter\n(Sub-millisecond screening)"]
-            S2["Stage 2: ExtraTrees Diagnostic Classifier\n(Multiclass fault diagnosis)"]
-            S1 -->|Anomaly Triggered| S2
+            S1["Stage 1: SGD Fast Binary Filter\n(Sub-millisecond screening < 1.5 ms)"]
+            S2["Stage 2: ExtraTrees Diagnostic Classifier\n(Multiclass fault diagnosis ~ 3.1 ms)"]
+            S1 -->|Anomaly Flagged (P >= 0.45)| S2
         end
         
-        STEP -->|14-D Feature Vector| MLEnsemble
+        STEP -->|14-D Concatenated Vector| MLEnsemble
         MLEnsemble -->|Diagnostic Prediction & Latency| STEP
         
         WIN["Sliding Window Aggregator\n(5-second window, 1-second slide)"]
@@ -38,21 +57,21 @@ flowchart TD
     end
 
     subgraph APIServer ["FastAPI Server (Port 8000)"]
-        SRV["FastAPI Application Lifespan"]
-        REST["REST Endpoints\n/api/health, /api/services\n/api/telemetry/*, /api/benchmark"]
-        WS["WebSocket Telemetry Hub\n/ws/stream"]
+        SRV["FastAPI Lifespan Manager"]
+        REST["REST Endpoints\n/api/health, /api/services, /api/kafka/status\n/api/telemetry/*, /api/fault/*, /api/benchmark"]
+        WS["WebSocket Telemetry Hub\n/ws/stream (100-packet ring buffer)"]
         SRV --- REST
         SRV --- WS
     end
 
-    STEP -->|Full Telemetry Packet| WS
+    STEP -->|Unified Telemetry Packet| WS
 
-    subgraph ClientUI ["Browser Operations Console"]
+    subgraph ClientUI ["Browser Operations Console (60 FPS)"]
         DASH["HTML5 / Canvas Dashboard"]
-        KPI["Row 1: KPI Metrics Strip"]
-        TWIN["Row 2: Dynamic Twin Canvas + Real-Time Charts"]
+        KPI["Row 1: KPI Metrics Strip (CHI, Delay, Fault)"]
+        TWIN["Row 2: 2D Dynamic Motor/Pump Canvas + 4 Charts"]
         DIAG["Row 3: Inference Breakdown + Fault Injection Deck"]
-        CTRL["Row 4: Pipeline Services & Controls"]
+        CTRL["Row 4: Pipeline Flow + Kafka Status & Controls"]
         FEED["Row 5: Audit Feed + Benchmark Matrix"]
         
         DASH --- KPI
@@ -65,11 +84,9 @@ flowchart TD
     WS -->|JSON Broadcast 10 Hz| DASH
     DASH -->|REST Actions| REST
 
-    subgraph DistributedStack ["Default Docker Distributed Stack"]
-        KAFKA["Apache Kafka Broker (9092)\nTopic: iiot-sensor-stream"]
-        SPARK["PySpark Structured Streaming Job\nWindowed Aggregates"]
-        STEP -->|Raw telemetry| KAFKA
-        KAFKA --> SPARK
+    subgraph DistributedBatchReference ["Spark Structured Streaming Reference"]
+        SPARK["PySpark Structured Streaming Job\n(streaming/spark_streaming_job.py)\nWindowed Kafka Analytics Reference"]
+        TOPIC -.->|ReadStream| SPARK
     end
 ```
 
@@ -77,44 +94,57 @@ flowchart TD
 
 ## 2. Event Lifecycle & Dataflow
 
-Every 100 ms (10 Hz), the in-process streaming loop completes the following 7-phase sequence:
+Every 100 ms (10 Hz), the decoupled streaming pipeline executes the following 8-phase sequence:
 
-1. **Telemetry Generation:** `IIoTSensorStreamSimulator.generate_sample()` computes 7 physical channels based on time, motor slip equations, load variations, and active fault modulation.
-2. **Digital Twin Synchronization:** `IndustrialDigitalTwin.process_telemetry()` computes expected physical state from first-principles motor/pump load curves.
-3. **Residual Extraction & CHI Evaluation:**
-   - For each of the 7 features: $R_i(t) = |X_i(t) - \hat{X}_i(t)|$.
-   - Z-score normalization against healthy baseline: $z_i(t) = \max\left(0, \frac{R_i(t) - \mu_i}{\sigma_i}\right)$.
-   - Composite Health Index: $\text{CHI}(t) = 100 \times \exp(-0.25 \sum w_i z_i)$.
-4. **14-D Feature Vector Assembly:** Concatenates 7 raw sensor values + 7 residual values in strictly ordered sequence.
-5. **Two-Stage ML Inference:**
-   - **Stage 1 (SGD Classifier):** Scaled 14-D vector is evaluated. If anomaly probability $p_{\text{anom}} < 0.45$, Stage 2 is bypassed (Fast Path, $\sim 1.5$ ms delay).
-   - **Stage 2 (ExtraTrees Classifier):** Invoked if anomaly flagged. Predicts exact fault class ($1 \dots 5$) and confidence percentage (Diagnostic Path, $\sim 4.8$ ms delay).
-6. **Window Aggregation & Buffering:** Packet appended to sliding buffer (`maxlen=100`) and rolling 5-second window metrics computed.
-7. **WebSocket Broadcast:** JSON packet serialized and pushed asynchronously to all connected browser WebSocket clients.
+1. **Telemetry Generation (Edge Simulator):** `IIoTSensorStreamSimulator.generate_sample()` computes 7 physical sensor channels (vibration RMS, vibration peak, temperature, RPM, phase current, hydraulic pressure, acoustic emissions) governed by first-principles induction motor slip equations and active fault modulation.
+2. **Kafka Producer Serialization:** `IIoTKafkaProducer` serializes the reading into JSON keyed by `asset_id` (`TWIN-MTR-01`) and publishes the event to Apache Kafka topic `iiot-sensor-stream`.
+3. **Broker Transit & Ordering:** Apache Kafka (KRaft consensus mode) commits the record to partition 0 with monotonic offset numbering, guaranteeing FIFO temporal ordering.
+4. **Kafka Consumer Polling:** `IIoTKafkaConsumer` (belonging to consumer group `iiot-digital-twin-cg`) polls the message from the topic with zero lag. *(If the broker is unreachable, the engine automatically falls back to in-process memory transit without packet loss).*
+5. **Digital Twin Synchronization:** `IndustrialDigitalTwin.process_telemetry()` computes expected physical state from coupled electrical and thermal models:
+   - Slip factor $s(t)$ and mechanical load $\lambda(t) \in [0.4, 1.0]$.
+   - First-order thermal dissipation $\hat{T}_{\text{ss}}(t) = T_{\text{ambient}} + 35.0 \cdot (I/I_{\text{rated}})^{1.8}$ with $\tau = 35\text{ s}$.
+   - ISO 10816 Class II vibration baseline velocity $\hat{V}_{\text{rms}}(t) = 1.5 + 0.6 \lambda(t)$.
+6. **Residual Extraction & Composite Health Index (CHI):**
+   - 7-D physical residual vector: $R_i(t) = |X_i(t) - \hat{X}_i(t)|$.
+   - Z-score normalization against calibrated healthy baseline: $z_i(t) = \max\left(0, \frac{R_i(t) - \mu_i}{\sigma_i}\right)$.
+   - Weighted exponential decay: $\text{CHI}_{\text{raw}}(t) = 100 \times \exp(-0.25 \sum w_i z_i)$.
+   - EWMA smoothing: $\text{CHI}(t) = 0.85 \cdot \text{CHI}(t-1) + 0.15 \cdot \text{CHI}_{\text{raw}}(t)$, clamped to $[5.0, 100.0]\%$.
+7. **Two-Stage ML Inference (Ranpariya & Sharma 2025):**
+   - Concatenates 7 raw sensors + 7 physical residuals into a standardized 14-D feature vector $\mathbf{X}_{14D}$.
+   - **Stage 1 (SGD Binary Screener):** Evaluated with modified Huber loss. If $P(\text{anomaly}) < 0.45$, Stage 2 is bypassed (**Fast Path**, $< 1.5$ ms delay).
+   - **Stage 2 (ExtraTrees Classifier):** Invoked conditionally when Stage 1 flags an anomaly ($P \ge 0.45$). Evaluates 60 decision trees across fault classes 1–5 (**Diagnostic Path**, $\sim 4.8$ ms delay).
+8. **Window Aggregation & WebSocket Broadcast:** Updates 5-second sliding window aggregates (1-second slide), appends to recent buffer (`maxlen=100`), logs timestamped anomalies, and pushes JSON to all browser clients via `/ws/stream`.
 
 ---
 
 ## 3. Network Topology & Ports
 
-| Component | Default Host Binding | Port | Protocol | Purpose |
-|---|---|---|---|---|
-| Dashboard & API | `127.0.0.1` (`0.0.0.0` in Docker) | `8000` | HTTP / WebSocket | Main web console, REST endpoints, telemetry stream |
-| Kafka Broker | `127.0.0.1` | `9092` | PLAINTEXT | Default Docker stack message broker |
-| Spark Structured Streaming | Internal Docker network | — | Kafka client | Default consumer of `iiot-sensor-stream` |
-| Kafka Controller | Internal Docker network | `9093` | PLAINTEXT | Kafka KRaft consensus quorum |
+| Component | Container Name | Host Binding | Port | Protocol | Purpose |
+|---|---|---|---|---|---|
+| Digital Twin Application | `digital-twin-app` | `127.0.0.1` (`0.0.0.0` in Docker) | `8000` | HTTP / WebSocket | Main web console, REST endpoints, telemetry WebSocket |
+| Apache Kafka Broker | `digital-twin-kafka` | `127.0.0.1` (Host) / `kafka` (Docker net) | `9092` / `29092` | PLAINTEXT | High-throughput telemetry event ingestion broker |
+| Kafka KRaft Controller | `digital-twin-kafka` | Internal Docker network | `9093` | PLAINTEXT | KRaft consensus metadata quorum (Zookeeper-less) |
 
 ---
 
 ## 4. Telemetry Event Schema
 
-Every packet emitted on `/ws/stream` conforms to the following schema:
+Every packet emitted on `/ws/stream` conforms to the unified 14-D streaming schema:
 
 ```json
 {
   "packet_id": 1420,
   "timestamp": 1776203100.125,
+  "kafka_enabled": true,
+  "kafka_metadata": {
+    "topic": "iiot-sensor-stream",
+    "partition": 0,
+    "offset": 1420,
+    "timestamp": 1776203100125
+  },
   "raw_telemetry": {
     "timestamp": 1776203100.125,
+    "asset_id": "TWIN-MTR-01",
     "vibration_rms": 1.842,
     "vibration_peak": 2.763,
     "temperature": 58.4,
@@ -122,7 +152,8 @@ Every packet emitted on `/ws/stream` conforms to the following schema:
     "current_amp": 24.1,
     "pressure_bar": 4.195,
     "acoustic_db": 67.8,
-    "fault_label": 0
+    "fault_label": 0,
+    "fault_name": "Normal Operation"
   },
   "digital_twin": {
     "asset_id": "TWIN-MTR-01",
@@ -188,3 +219,4 @@ Every packet emitted on `/ws/stream` conforms to the following schema:
   }
 }
 ```
+

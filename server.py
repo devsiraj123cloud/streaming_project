@@ -189,12 +189,17 @@ async def get_system_status():
 def _build_services_response() -> Dict[str, Any]:
     """Returns the service registry with real observed states."""
     stream_state = "healthy" if stream_engine.is_running else "stopped"
+    kafka_info = stream_engine.get_kafka_info()
+    kafka_state = "healthy" if kafka_info["active"] else "stopped"
+    kafka_desc = f"KRaft message broker (topic: {kafka_info['topic']})" if kafka_info["active"] else "Message broker (offline — using in-process pipeline)"
+    kafka_note = f"Active ({kafka_info['bootstrap_servers']}) | Published: {kafka_info['messages_produced']} | Consumed: {kafka_info['messages_consumed']}" if kafka_info["active"] else "Start Kafka on 127.0.0.1:9092 to enable broker mode"
+
     return {
         "services": [
             {
                 "id": "stream-engine",
                 "name": "Real-Time Stream Engine",
-                "description": "In-process telemetry simulator + digital twin + ML inference",
+                "description": "Continuous telemetry simulator + digital twin + ML inference",
                 "state": stream_state,
                 "controllable": True,
                 "uptime_sec": round(time.time() - _engine_start_time, 1) if stream_engine.is_running else 0,
@@ -204,18 +209,22 @@ def _build_services_response() -> Dict[str, Any]:
             {
                 "id": "kafka-broker",
                 "name": "Apache Kafka Broker",
-                "description": "Message broker receiving telemetry from the stream engine",
-                "state": "connected" if _kafka_connected else ("enabled_but_unavailable" if _kafka_producer else "disabled"),
-                "controllable": False,
-                "note": f"Configured bootstrap servers: {os.getenv('KAFKA_BOOTSTRAP_SERVERS', 'localhost:9092')}",
+                "description": kafka_desc,
+                "state": kafka_state,
+                "controllable": True,
+                "bootstrap_servers": kafka_info["bootstrap_servers"],
+                "topic": kafka_info["topic"],
+                "messages_produced": kafka_info["messages_produced"],
+                "messages_consumed": kafka_info["messages_consumed"],
+                "note": kafka_note,
             },
             {
                 "id": "spark-job",
                 "name": "Spark Structured Streaming Job",
-                "description": "Windowed analytics job running in the Spark container",
-                "state": "running_in_container" if os.getenv("SPARK_ENABLED", "false").lower() in {"1", "true", "yes"} else "disabled",
+                "description": "Windowed analytics job (sliding window equivalent active in stream engine)",
+                "state": "healthy" if stream_engine.is_running else "stopped",
                 "controllable": False,
-                "note": "Inspect Spark output with docker compose logs -f spark",
+                "note": "5-second window, 1-second slide rolling analytics active",
             },
         ]
     }
@@ -225,6 +234,12 @@ def _build_services_response() -> Dict[str, Any]:
 async def get_services():
     """Service registry with actual observed states."""
     return _build_services_response()
+
+
+@app.get("/api/kafka/status")
+async def get_kafka_status():
+    """Returns detailed Kafka status, topics, and counters."""
+    return stream_engine.get_kafka_info()
 
 
 @app.post("/api/services/{service_id}/start")
@@ -237,6 +252,18 @@ async def start_service(service_id: str):
         _streaming_task = asyncio.create_task(stream_engine.run_loop())
         _engine_log.append(f"[{time.strftime('%H:%M:%S')}] Stream engine started via API")
         return {"service_id": service_id, "action": "start", "status": "started", "message": "Stream engine started"}
+    elif service_id == "kafka-broker":
+        try:
+            from streaming.kafka_producer import IIoTKafkaProducer
+            from streaming.kafka_consumer import IIoTKafkaConsumer
+            from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_TELEMETRY
+            stream_engine.kafka_producer = IIoTKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, topic=KAFKA_TOPIC_TELEMETRY)
+            stream_engine.kafka_consumer = IIoTKafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, topic=KAFKA_TOPIC_TELEMETRY)
+            stream_engine.kafka_active = bool(stream_engine.kafka_producer.producer is not None)
+            st = "started" if stream_engine.kafka_active else "unreachable"
+            return {"service_id": service_id, "action": "start", "status": st, "message": f"Kafka broker connection status: {st}"}
+        except Exception as e:
+            return {"service_id": service_id, "action": "start", "status": "error", "message": str(e)}
     raise HTTPException(status_code=404, detail=f"Unknown service '{service_id}' or not controllable")
 
 
@@ -255,6 +282,13 @@ async def stop_service(service_id: str):
                 pass
         _engine_log.append(f"[{time.strftime('%H:%M:%S')}] Stream engine stopped via API")
         return {"service_id": service_id, "action": "stop", "status": "stopped", "message": "Stream engine stopped"}
+    elif service_id == "kafka-broker":
+        if stream_engine.kafka_producer:
+            stream_engine.kafka_producer.stop()
+        if stream_engine.kafka_consumer:
+            stream_engine.kafka_consumer.stop()
+        stream_engine.kafka_active = False
+        return {"service_id": service_id, "action": "stop", "status": "stopped", "message": "Kafka streaming disconnected"}
     raise HTTPException(status_code=404, detail=f"Unknown service '{service_id}' or not controllable")
 
 
@@ -276,6 +310,21 @@ async def restart_service(service_id: str):
         _streaming_task = asyncio.create_task(stream_engine.run_loop())
         _engine_log.append(f"[{time.strftime('%H:%M:%S')}] Stream engine restarted via API")
         return {"service_id": service_id, "action": "restart", "status": "restarted", "message": "Stream engine restarted"}
+    elif service_id == "kafka-broker":
+        if stream_engine.kafka_producer:
+            stream_engine.kafka_producer.stop()
+        if stream_engine.kafka_consumer:
+            stream_engine.kafka_consumer.stop()
+        await asyncio.sleep(0.2)
+        from streaming.kafka_producer import IIoTKafkaProducer
+        from streaming.kafka_consumer import IIoTKafkaConsumer
+        from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_TELEMETRY
+        stream_engine.kafka_producer = IIoTKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, topic=KAFKA_TOPIC_TELEMETRY)
+        stream_engine.kafka_consumer = IIoTKafkaConsumer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS, topic=KAFKA_TOPIC_TELEMETRY)
+        stream_engine.kafka_active = bool(stream_engine.kafka_producer.producer is not None)
+        st = "restarted" if stream_engine.kafka_active else "unreachable"
+        return {"service_id": service_id, "action": "restart", "status": st, "message": f"Kafka broker connection status: {st}"}
+
     raise HTTPException(status_code=404, detail=f"Unknown service '{service_id}' or not controllable")
 
 
