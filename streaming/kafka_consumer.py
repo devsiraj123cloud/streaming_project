@@ -31,6 +31,7 @@ class IIoTKafkaConsumer:
         self.is_running = False
         self.consumer = None
         self.messages_received = 0
+        self.error = None
         self._init_consumer()
 
     def _init_consumer(self):
@@ -46,8 +47,10 @@ class IIoTKafkaConsumer:
                 group_id="iiot-digital-twin-cg",
                 consumer_timeout_ms=500
             )
+            self.error = None
             logger.info(f"Subscribed to topic '{self.topic}' at {self.bootstrap_servers}")
         except Exception as e:
+            self.error = e
             logger.warning(f"Could not connect to Kafka consumer at {self.bootstrap_servers} ({e})")
             self.consumer = None
 
@@ -112,8 +115,8 @@ class IIoTKafkaConsumer:
             self.error = e
             logger.exception("Kafka consumer could not start")
         finally:
-            if consumer is not None:
-                consumer.close()
+            if self.consumer is not None:
+                self.consumer.close()
 
     def stop(self):
         self.is_running = False

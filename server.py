@@ -86,9 +86,11 @@ async def lifespan(app: FastAPI):
     _streaming_task = asyncio.create_task(stream_engine.run_loop())
     if KAFKA_ENABLED:
         _kafka_producer = IIoTKafkaProducer()
-        _kafka_connected = _kafka_producer.producer is not None
+        _kafka_connected = _kafka_producer.is_connected()
         if not _kafka_connected:
-            raise RuntimeError("KAFKA_ENABLED=true but Kafka broker connection failed")
+            logger.warning(
+                "[Server] Kafka is enabled but unavailable; using the in-process pipeline."
+            )
     logger.warning(f"[Server] Digital Twin streaming started on http://{HOST}:{PORT}")
     yield
     # --- Shutdown ---

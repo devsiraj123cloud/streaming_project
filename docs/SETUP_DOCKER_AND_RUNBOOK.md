@@ -68,7 +68,7 @@ In Docker, `HOST` is automatically set to `0.0.0.0` inside `compose.yaml`, while
 ## 4. Persistent Storage & Data Reset
 
 - **Docker Named Volume:** `digital-twin-data` (mounted at `/app/data`).
-  - Persists `data/dataset_benchmark.csv` and `data/model_benchmark_results.json` across container restarts.
+  - Persists generated benchmark data and results if the training pipeline creates them.
 - **Safe Data Reset:**
   If you wish to wipe persisted benchmark data and retrain models from scratch:
   ```powershell

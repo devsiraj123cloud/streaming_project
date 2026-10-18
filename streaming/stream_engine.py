@@ -20,7 +20,7 @@ from models.digital_twin import IndustrialDigitalTwin
 from models.two_stage_ensemble import TwoStageFaultDetectionEnsemble
 from streaming.kafka_producer import IIoTKafkaProducer
 from streaming.kafka_consumer import IIoTKafkaConsumer
-from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_TOPIC_TELEMETRY
+from config.settings import KAFKA_BOOTSTRAP_SERVERS, KAFKA_ENABLED, KAFKA_TOPIC_TELEMETRY
 
 logger = logging.getLogger("StreamEngine")
 _kafka_queue = None
@@ -96,7 +96,7 @@ class RealTimeStreamingEngine:
         try:
             self.kafka_producer = IIoTKafkaProducer(bootstrap_servers=self.kafka_bootstrap_servers, topic=self.kafka_topic)
             self.kafka_consumer = IIoTKafkaConsumer(bootstrap_servers=self.kafka_bootstrap_servers, topic=self.kafka_topic)
-            self.kafka_active = bool(self.kafka_producer.producer is not None)
+            self.kafka_active = self.kafka_producer.is_connected()
             if self.kafka_active:
                 logger.info(f"[Engine] Kafka streaming active on topic '{self.kafka_topic}' ({self.kafka_bootstrap_servers})")
         except Exception as exc:
@@ -121,7 +121,7 @@ class RealTimeStreamingEngine:
 
     def get_kafka_info(self) -> Dict[str, Any]:
         """Returns live Kafka broker and telemetry metrics."""
-        connected = bool(self.kafka_producer and self.kafka_producer.producer is not None)
+        connected = bool(self.kafka_producer and self.kafka_producer.is_connected())
         return {
             "active": connected,
             "bootstrap_servers": self.kafka_bootstrap_servers,
@@ -171,14 +171,14 @@ class RealTimeStreamingEngine:
         3. Two-Stage Ensemble inference
         4. Alert logging
         """
-        if KAFKA_ENABLED:
+        if KAFKA_ENABLED and self.kafka_active:
             raise RuntimeError("step() is only available when Kafka mode is disabled; Kafka mode processes records in its consumer")
         self.packet_counter += 1
         t_now = time.time()
         
         # 1. Physics-based telemetry
         raw_telemetry = self.simulator.generate_sample(t_now)
-        if KAFKA_ENABLED:
+        if KAFKA_ENABLED and self.kafka_active:
             _start_kafka_publisher()
             if _kafka_queue is None or not _kafka_worker_started:
                 raise RuntimeError("Kafka is enabled, but the telemetry producer is unavailable")
@@ -242,7 +242,7 @@ class RealTimeStreamingEngine:
 
     async def run_loop(self):
         """Asynchronous streaming loop running continuously."""
-        if KAFKA_ENABLED:
+        if KAFKA_ENABLED and self.kafka_active:
             self._event_loop = asyncio.get_running_loop()
             self._start_kafka_consumer()
         self.is_running = True
@@ -250,7 +250,7 @@ class RealTimeStreamingEngine:
         
         while self.is_running:
             t0 = time.time()
-            if KAFKA_ENABLED:
+            if KAFKA_ENABLED and self.kafka_active:
                 raw_telemetry = self.simulator.generate_sample(time.time())
                 _start_kafka_publisher()
                 if _kafka_queue is None or not _kafka_worker_started:

@@ -19,6 +19,9 @@ for directory in [DATA_DIR, MODELS_DIR, STATIC_DIR, TEMPLATES_DIR]:
 
 # Kafka Configuration
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "127.0.0.1:9092")
+KAFKA_ENABLED = os.getenv("KAFKA_ENABLED", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 KAFKA_TOPIC_TELEMETRY = "iiot-sensor-stream"
 KAFKA_TOPIC_ALERTS = "iiot-anomaly-alerts"
 KAFKA_TOPIC_TWIN_STATE = "iiot-digital-twin-state"

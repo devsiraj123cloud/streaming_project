@@ -63,6 +63,15 @@ class IIoTKafkaProducer:
                 logger.warning(f"Kafka send failed: {e}")
         return record
 
+    def is_connected(self) -> bool:
+        """Return whether the Kafka client currently has a broker connection."""
+        if self.producer is None:
+            return False
+        try:
+            return bool(self.producer.bootstrap_connected())
+        except Exception:
+            return False
+
     def start_streaming(self, max_records: Optional[int] = None, interval_sec: float = STREAM_BATCH_INTERVAL_SEC):
         """Streams sensor data continuously to Kafka."""
         self.is_running = True

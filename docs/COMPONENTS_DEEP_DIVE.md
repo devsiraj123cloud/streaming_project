@@ -78,7 +78,7 @@ This document provides a module-by-module breakdown of each source component, de
   - `save_models()` / `load_models()`: Joblib serialization to `models/saved/`.
 
 ### `models/train_models.py`
-- **Responsibility:** Generates 18,000 synthetic benchmark samples, trains Proposed Two-Stage Ensemble vs Baseline A (Random Forest, 7-D raw) and Baseline B (SVM RBF, 7-D raw), and exports comparative metrics to `data/model_benchmark_results.json`.
+- **Responsibility:** Generates 18,000 synthetic benchmark samples when needed, trains Proposed Two-Stage Ensemble vs Baseline A (Random Forest, 7-D raw) and Baseline B (SVM RBF, 7-D raw), and exports comparative metrics to the generated `data/model_benchmark_results.json`.
 
 ---
 

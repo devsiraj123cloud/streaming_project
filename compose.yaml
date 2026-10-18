@@ -11,8 +11,6 @@ services:
       - SPARK_ENABLED=true
       - HOST=0.0.0.0
       - PORT=8000
-    depends_on:
-      - kafka
     volumes:
       # Persist benchmark results and dataset between restarts
       - twin-data:/app/data

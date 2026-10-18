@@ -67,3 +67,22 @@ def test_digital_twin_clamping():
         result = dt.process_telemetry(extreme_telemetry)
     assert result["composite_health_index"] >= 5.0
     assert result["composite_health_index"] <= 100.0
+
+def test_digital_twin_faults_do_not_collapse_everything_to_floor():
+    for fault_code in range(1, 6):
+        dt = IndustrialDigitalTwin()
+        telemetry = {
+            "timestamp": 1003.0,
+            "vibration_rms": 7.0,
+            "vibration_peak": 12.0,
+            "temperature": 100.0,
+            "rpm": 1420.0,
+            "current_amp": 36.0,
+            "pressure_bar": 1.5,
+            "acoustic_db": 95.0,
+        }
+        for _ in range(20):
+            result = dt.process_telemetry(telemetry)
+
+        assert result["composite_health_index"] > 5.0
+        assert result["composite_health_index"] < 60.0

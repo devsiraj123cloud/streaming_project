@@ -46,6 +46,7 @@ class IndustrialDigitalTwin:
         # Health Index smoothing
         self.health_index = 100.0
         self.cumulative_anomalies = 0
+        self.max_health_z_score = 4.0
 
     def compute_virtual_state(self, sensor_reading: Dict[str, Any]) -> Dict[str, float]:
         """
@@ -107,7 +108,7 @@ class IndustrialDigitalTwin:
             # Z-score normalization against healthy baseline distribution
             z = max(0.0, (raw_residual - base_info["mean"]) / base_info["std"])
             z_scores[feature] = round(z, 2)
-            weighted_residual_sum += z * base_info["weight"]
+            weighted_residual_sum += min(z, self.max_health_z_score) * base_info["weight"]
 
         # Health Index calculation:
         # 100% when weighted residual Z-score is 0; declines exponentially as residual grows

@@ -12,7 +12,7 @@ This roadmap tracks implemented milestones, current architectural boundaries, an
 - [x] **Industrial Operations Console:** High-tech 5-row responsive dashboard, native Canvas charts, dynamic 2D visualizer, and fault controls.
 - [x] **Service Lifecycle API:** REST endpoints for start/stop/restart, bounded log buffer, and clean cancellation.
 - [x] **Dockerized Packaging & Windows Launchers:** Self-contained Dockerfile, Compose stack with loopback binding, and `start.bat` / `stop.bat`.
-- [x] **Automated Test Suite:** Unit and integration tests covering Digital Twin, ML Ensemble, Streaming Engine, and API contracts (22/22 passing).
+- [x] **Automated Test Suite:** Unit and integration tests covering Digital Twin, ML Ensemble, Streaming Engine, and API contracts (27/27 passing).
 - [x] **Technical Documentation Set:** Comprehensive 12-file operational and academic documentation.
 
 ---
